@@ -1,15 +1,19 @@
+import streamlit as st
 from docx import Document
 from docx.table import Table
 from docx.text.paragraph import Paragraph
 
 
+# -------------------------------
+# Core DOCX → HTML logic
+# -------------------------------
+
 def iter_blocks(document):
     """
     Yield paragraphs and tables in the exact order
-    they appear in the DOCX.
+    they appear in the DOCX file.
     """
-    body = document.element.body
-    for child in body.iterchildren():
+    for child in document.element.body.iterchildren():
         if child.tag.endswith('}p'):
             yield Paragraph(child, document)
         elif child.tag.endswith('}tbl'):
@@ -19,6 +23,7 @@ def iter_blocks(document):
 def render_runs(paragraph):
     """
     Render paragraph text preserving run-level bold.
+    No inferred formatting.
     """
     html = ""
     for run in paragraph.runs:
@@ -49,14 +54,18 @@ def table_to_html(table):
     return "\n".join(html)
 
 
-def docx_to_html(docx_path, output_html_path):
+def docx_to_html(docx_source):
     """
-    Main conversion function.
+    Convert DOCX to HTML.
+    docx_source can be:
+    - Streamlit UploadedFile
+    - file-like object
+    - file path (string)
     """
-    doc = Document(docx_path)
+    document = Document(docx_source)
     html_output = []
 
-    for block in iter_blocks(doc):
+    for block in iter_blocks(document):
         if isinstance(block, Paragraph):
             content = render_runs(block)
             if content.strip():
@@ -65,16 +74,36 @@ def docx_to_html(docx_path, output_html_path):
         elif isinstance(block, Table):
             html_output.append(table_to_html(block))
 
-    html = "\n".join(html_output)
-
-    with open(output_html_path, "w", encoding="utf-8") as f:
-        f.write(html)
+    return "\n".join(html_output)
 
 
 # -------------------------------
-# Example usage
+# Streamlit UI
 # -------------------------------
-if __name__ == "__main__":
-    input_docx = "input.docx"
-    output_html = "output.html"
-    docx_to_html(input_docx, output_html)
+
+st.set_page_config(page_title="DOCX → HTML Converter", layout="wide")
+st.title("DOCX → HTML Converter (Order & Format Exact)")
+
+uploaded_file = st.file_uploader(
+    "Upload a DOCX file",
+    type=["docx"]
+)
+
+if uploaded_file:
+    try:
+        html_output = docx_to_html(uploaded_file)
+
+        st.subheader("Generated HTML")
+        st.code(html_output, language="html")
+
+        st.download_button(
+            label="Download HTML",
+            data=html_output,
+            file_name="output.html",
+            mime="text/html"
+        )
+
+    except Exception as e:
+        st.error("Failed to process the document.")
+        st.exception(e)
+
