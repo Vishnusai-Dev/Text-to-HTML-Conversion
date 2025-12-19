@@ -4,7 +4,12 @@ from docx.table import Table
 from docx.text.paragraph import Paragraph
 
 
+# -------------------------------------------------
+# Helpers to preserve DOCX structure
+# -------------------------------------------------
+
 def iter_blocks(document):
+    """Yield paragraphs and tables in exact DOCX order."""
     for child in document.element.body.iterchildren():
         if child.tag.endswith('}p'):
             yield Paragraph(child, document)
@@ -13,17 +18,17 @@ def iter_blocks(document):
 
 
 def is_list_paragraph(paragraph):
-    return paragraph._p.pPr is not None and paragraph._p.pPr.numPr is not None
+    pPr = paragraph._p.pPr
+    return pPr is not None and pPr.numPr is not None
 
 
 def is_numbered_list(paragraph):
     numPr = paragraph._p.pPr.numPr
-    if numPr is None:
-        return False
-    return numPr.numId is not None
+    return numPr is not None and numPr.numId is not None
 
 
 def render_runs(paragraph):
+    """Render paragraph preserving run-level bold."""
     html = ""
     for run in paragraph.runs:
         if run.bold:
@@ -33,9 +38,24 @@ def render_runs(paragraph):
     return html
 
 
-def is_entire_paragraph_bold(paragraph):
+def is_faq_question(paragraph):
+    """
+    Detect FAQ questions where:
+    - Paragraph is numbered
+    - Main text (excluding numbering) is bold
+    """
     runs = [run for run in paragraph.runs if run.text.strip()]
-    return runs and all(run.bold for run in runs)
+    if not runs:
+        return False
+
+    # Ignore leading numbering like "1."
+    first = runs[0].text.strip()
+    if first.rstrip(".").isdigit():
+        content_runs = runs[1:]
+    else:
+        content_runs = runs
+
+    return content_runs and all(run.bold for run in content_runs)
 
 
 def table_to_html(table):
@@ -52,6 +72,10 @@ def table_to_html(table):
     return "\n".join(html)
 
 
+# -------------------------------------------------
+# Main conversion function
+# -------------------------------------------------
+
 def docx_to_html(docx_source):
     document = Document(docx_source)
     html_output = []
@@ -60,7 +84,7 @@ def docx_to_html(docx_source):
 
     for block in iter_blocks(document):
 
-        # ---------------- TABLE ----------------
+        # ---------- TABLE ----------
         if isinstance(block, Table):
             if current_list:
                 html_output.append(f"</{current_list}>")
@@ -68,7 +92,7 @@ def docx_to_html(docx_source):
             html_output.append(table_to_html(block))
             continue
 
-        # ---------------- PARAGRAPH ----------------
+        # ---------- PARAGRAPH ----------
         if isinstance(block, Paragraph):
             text = render_runs(block)
             if not text.strip():
@@ -109,8 +133,8 @@ def docx_to_html(docx_source):
                 html_output.append(f"</{current_list}>")
                 current_list = None
 
-            # ----- FAQ QUESTION (FULLY BOLD PARAGRAPH) -----
-            if is_entire_paragraph_bold(block):
+            # ----- FAQ QUESTION -----
+            if is_faq_question(block):
                 html_output.append(f"<p><strong>{block.text}</strong></p>")
             else:
                 html_output.append(f"<p>{text}</p>")
@@ -121,10 +145,12 @@ def docx_to_html(docx_source):
     return "\n".join(html_output)
 
 
-# ---------------- STREAMLIT UI ----------------
+# -------------------------------------------------
+# Streamlit UI
+# -------------------------------------------------
 
 st.set_page_config(page_title="DOCX → HTML Converter", layout="wide")
-st.title("DOCX → HTML Converter (Format-Exact)")
+st.title("DOCX → HTML Converter (Order & Format Exact)")
 
 uploaded_file = st.file_uploader("Upload DOCX file", type=["docx"])
 
@@ -135,8 +161,8 @@ if uploaded_file:
     st.code(html_output, language="html")
 
     st.download_button(
-        "Download HTML",
-        html_output,
+        label="Download HTML",
+        data=html_output,
         file_name="output.html",
         mime="text/html"
     )
